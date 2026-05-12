@@ -1,6 +1,31 @@
 <?php
 declare(strict_types=1);
 
+if (isset($_GET['action']) && $_GET['action'] === 'download_trello') {
+    $shortUrl = isset($_GET['short_url']) ? trim((string)$_GET['short_url']) : '';
+    if ($shortUrl === '' || !str_starts_with($shortUrl, 'https://trello.com/b/')) {
+        http_response_code(400);
+        exit('shortUrl inválida.');
+    }
+    $fetchUrl = rtrim($shortUrl, '/') . '.json';
+    $context = stream_context_create([
+        'http' => ['timeout' => 30, 'follow_location' => 1],
+        'ssl'  => ['verify_peer' => false, 'verify_peer_name' => false],
+    ]);
+    $data = @file_get_contents($fetchUrl, false, $context);
+    if ($data === false) {
+        http_response_code(502);
+        exit('Não foi possível buscar o arquivo do Trello.');
+    }
+    $slug = preg_replace('/[^A-Za-z0-9]/', '', substr($shortUrl, strrpos($shortUrl, '/') + 1));
+    $filename = 'trello_' . date('Y-m-d') . '_' . $slug . '.json';
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Content-Length: ' . strlen($data));
+    echo $data;
+    exit;
+}
+
 $baseDir = __DIR__;
 $defaultJsonPath = $baseDir . DIRECTORY_SEPARATOR . 'dados.json';
 $uploadsDir = $baseDir . DIRECTORY_SEPARATOR . 'uploads';
@@ -80,6 +105,7 @@ function saveUploadsIndex(string $uploadsDir, string $indexPath): bool
 
                 $jsonUpdatedAtBr = null;
                 $trelloId = '';
+                $shortUrl = '';
                 $raw = file_get_contents($filePath);
                 if ($raw !== false) {
                     $decoded = json_decode($raw, true);
@@ -92,6 +118,9 @@ function saveUploadsIndex(string $uploadsDir, string $indexPath): bool
                             $jsonUpdatedAtBr = date('d/m/Y H:i:s', $jsonUpdatedAt);
                         }
                     }
+                    if (is_array($decoded) && isset($decoded['shortUrl']) && is_string($decoded['shortUrl'])) {
+                        $shortUrl = trim($decoded['shortUrl']);
+                    }
                 }
 
                 if ($trelloId === '') {
@@ -103,6 +132,7 @@ function saveUploadsIndex(string $uploadsDir, string $indexPath): bool
 
                 $entriesByTrelloId[$trelloId][] = [
                     'id_trello' => $trelloId,
+                    'short_url' => $shortUrl,
                     'nome_arquivo' => basename($filePath),
                     'data' => date('d/m/Y', $time),
                     'hora' => date('H:i:s', $time),
@@ -233,6 +263,7 @@ if (is_file($defaultJsonPath)) {
     $availableFiles['dados.json'] = [
         'path' => 'dados.json',
         'label' => buildFileLabel('dados.json'),
+        'short_url' => '',
     ];
 }
 
@@ -284,6 +315,7 @@ foreach ($indexedUploads as $entry) {
     $availableFiles[$relative] = [
         'path' => $relative,
         'label' => $label,
+        'short_url' => isset($entry['short_url']) ? trim((string)$entry['short_url']) : '',
     ];
 }
 
@@ -820,6 +852,7 @@ if (!empty($clearFilterParams)) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Burndown e Burnup - <?php echo htmlspecialchars($boardName, ENT_QUOTES, 'UTF-8'); ?></title>
     <link href="assets/bootstrap/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
     <style>
         .chart-wrapper {
             position: relative;
@@ -857,28 +890,39 @@ if (!empty($clearFilterParams)) {
 
     <div class="card shadow-sm mb-4">
         <div class="card-body">
-            <h2 class="h5 mb-3">Ler arquivo existente</h2>
+            <h2 class="h5 mb-3">Arquivos JSON disponíveis</h2>
             <?php if ($sourceError !== null): ?>
                 <div class="alert alert-danger py-2"><?php echo htmlspecialchars($sourceError, ENT_QUOTES, 'UTF-8'); ?></div>
             <?php endif; ?>
-            <form method="get" class="row g-3 align-items-end">
-                <div class="col-md-12">
-                    <label for="source_file" class="form-label">Arquivo JSON disponível</label>
-                    <select class="form-select" id="source_file" name="source_file">
-                        <?php foreach ($availableFiles as $fileMeta): ?>
-                            <option value="<?php echo htmlspecialchars($fileMeta['path'], ENT_QUOTES, 'UTF-8'); ?>" <?php echo $fileMeta['path'] === $selectedFileRel ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($fileMeta['label'], ENT_QUOTES, 'UTF-8'); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+            <div class="list-group">
+                <?php foreach ($availableFiles as $fileMeta):
+                    $isActive = $fileMeta['path'] === $selectedFileRel;
+                    $useParams = ['source_file' => $fileMeta['path']];
+                    if ($filterStartInput !== '') {
+                        $useParams['start_date'] = $filterStartInput;
+                    }
+                    if ($filterEndInput !== '') {
+                        $useParams['end_date'] = $filterEndInput;
+                    }
+                    $useHref = strtok($_SERVER['REQUEST_URI'], '?') . '?' . http_build_query($useParams);
+                ?>
+                <div class="list-group-item d-flex align-items-center gap-2 py-2<?php echo $isActive ? ' list-group-item-primary' : ''; ?>">
+                    <span class="flex-grow-1 small text-truncate" title="<?php echo htmlspecialchars($fileMeta['label'], ENT_QUOTES, 'UTF-8'); ?>">
+                        <?php if ($isActive): ?><strong><?php endif; ?>
+                        <?php echo htmlspecialchars($fileMeta['label'], ENT_QUOTES, 'UTF-8'); ?>
+                        <?php if ($isActive): ?></strong><?php endif; ?>
+                    </span>
+                    <?php if (!$isActive): ?>
+                    <a href="<?php echo htmlspecialchars($useHref, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary flex-shrink-0">Usar</a>
+                    <?php endif; ?>
+                    <?php if ($fileMeta['short_url'] !== ''): ?>
+                    <a href="<?php echo $fileMeta['short_url'].'.json'; ?>" class="btn btn-sm btn-outline-success flex-shrink-0" title="Baixar JSON atualizado do Trello" download="file.json">
+                        <i class="fa-solid fa-download"></i>
+                    </a>
+                    <?php endif; ?>
                 </div>
-               
-                <input type="hidden" name="start_date" value="<?php echo htmlspecialchars($filterStartInput, ENT_QUOTES, 'UTF-8'); ?>">
-                <input type="hidden" name="end_date" value="<?php echo htmlspecialchars($filterEndInput, ENT_QUOTES, 'UTF-8'); ?>">
-                <div class="col-md-4 d-grid">
-                    <button class="btn btn-primary" type="submit">Usar arquivo selecionado</button>
-                </div>
-            </form>
+                <?php endforeach; ?>
+            </div>
         </div>
     </div>
 
