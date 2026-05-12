@@ -602,7 +602,7 @@ if (!empty($clearFilterParams)) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Burndown e Burnup - <?php echo htmlspecialchars($boardName, ENT_QUOTES, 'UTF-8'); ?></title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="assets/bootstrap/bootstrap.min.css" rel="stylesheet">
     <style>
         .chart-wrapper {
             position: relative;
@@ -738,7 +738,7 @@ if (!empty($clearFilterParams)) {
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="assets/chartjs/chart.umd.min.js"></script>
 <script>
 const labels = <?php echo json_encode($chartLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
 const scopeSeries = <?php echo json_encode($chartScopeSeries, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;

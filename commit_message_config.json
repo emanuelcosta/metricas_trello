@@ -1,0 +1,27 @@
+{
+    "enabled": true,
+    "language": "pt-BR",
+    "style": {
+        "tense": "futuro_do_preterito",
+        "voice": "ativa",
+        "max_subject_length": 72
+    },
+    "format": {
+        "subject_template": "{tipo}: {acao_no_futuro_do_preterito}",
+        "body_required": true,
+        "body_guideline": "Descreveria o que mudaria, por que mudaria e impacto esperado."
+    },
+    "allowed_types": [
+        "feat",
+        "fix",
+        "refactor",
+        "docs",
+        "chore",
+        "test"
+    ],
+    "examples": [
+        "feat: adicionaria filtro por período nos gráficos",
+        "fix: corrigiria cálculo de demandas com checklist",
+        "docs: documentaria estrutura do json de integrações"
+    ]
+}
