@@ -872,28 +872,7 @@ if (!empty($clearFilterParams)) {
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <div class="col-md-4">
-                    <label for="todo_list_id" class="form-label">Coluna "A fazer"</label>
-                    <select class="form-select" id="todo_list_id" name="todo_list_id">
-                        <option value="">-- Não definida --</option>
-                        <?php foreach ($boardListsIndex as $indexKey => $listMeta): ?>
-                            <option value="<?php echo htmlspecialchars($listMeta['id'], ENT_QUOTES, 'UTF-8'); ?>" <?php echo $quickConfiguredTodoListId === $listMeta['id'] ? 'selected' : ''; ?>>
-                                [<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>] <?php echo htmlspecialchars($listMeta['name'], ENT_QUOTES, 'UTF-8'); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="col-md-4">
-                    <label for="done_list_id" class="form-label">Coluna "Concluídas"</label>
-                    <select class="form-select" id="done_list_id" name="done_list_id">
-                        <option value="">-- Não definida --</option>
-                        <?php foreach ($boardListsIndex as $indexKey => $listMeta): ?>
-                            <option value="<?php echo htmlspecialchars($listMeta['id'], ENT_QUOTES, 'UTF-8'); ?>" <?php echo $quickConfiguredDoneListId === $listMeta['id'] ? 'selected' : ''; ?>>
-                                [<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>] <?php echo htmlspecialchars($listMeta['name'], ENT_QUOTES, 'UTF-8'); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
+               
                 <input type="hidden" name="start_date" value="<?php echo htmlspecialchars($filterStartInput, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="end_date" value="<?php echo htmlspecialchars($filterEndInput, ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="col-md-4 d-grid">
