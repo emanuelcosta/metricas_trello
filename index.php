@@ -138,12 +138,28 @@ function saveUploadsIndex(string $uploadsDir, string $indexPath): bool
 }
 
 $uploadError = null;
+$listConfigError = null;
 $filterStartInput = isset($_GET['start_date']) ? trim((string)$_GET['start_date']) : '';
 $filterEndInput = isset($_GET['end_date']) ? trim((string)$_GET['end_date']) : '';
 $sourceFileInput = isset($_GET['source_file']) ? trim((string)$_GET['source_file']) : '';
+$hasQuickTodoParam = array_key_exists('todo_list_id', $_GET);
+$hasQuickDoneParam = array_key_exists('done_list_id', $_GET);
+$quickTodoListInput = $hasQuickTodoParam ? trim((string)$_GET['todo_list_id']) : '';
+$quickDoneListInput = $hasQuickDoneParam ? trim((string)$_GET['done_list_id']) : '';
 $sourceError = null;
+$listConfigSuccess = isset($_GET['config_lists']) && $_GET['config_lists'] === 'ok';
+$uploadSuccess = isset($_GET['upload']) && $_GET['upload'] === 'ok';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+$config = loadConfig($configPath);
+if (empty($config)) {
+    $config = [
+        'latest_uploaded_file' => 'dados.json',
+        'updated_at' => gmdate('c'),
+    ];
+    saveConfig($configPath, $config);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (!isset($_POST['action']) || $_POST['action'] !== 'save_list_config')) {
     if (!isset($_FILES['trello_json']) || !is_array($_FILES['trello_json'])) {
         $uploadError = 'Nenhum arquivo foi enviado.';
     } elseif (!isset($_FILES['trello_json']['error']) || $_FILES['trello_json']['error'] !== UPLOAD_ERR_OK) {
@@ -184,7 +200,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!move_uploaded_file($tmpName, $targetPath)) {
                         $uploadError = 'Não foi possível salvar o arquivo enviado.';
                     } else {
-                        $config = loadConfig($configPath);
                         $config['latest_uploaded_file'] = 'uploads/' . $targetFileName;
                         $config['updated_at'] = gmdate('c');
                         if (!saveConfig($configPath, $config)) {
@@ -209,15 +224,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
-}
-
-$config = loadConfig($configPath);
-if (empty($config)) {
-    $config = [
-        'latest_uploaded_file' => 'dados.json',
-        'updated_at' => gmdate('c'),
-    ];
-    saveConfig($configPath, $config);
 }
 
 saveUploadsIndex($uploadsDir, $uploadsIndexPath);
@@ -350,11 +356,211 @@ $checklists = isset($board['checklists']) && is_array($board['checklists']) ? $b
 $actions = isset($board['actions']) && is_array($board['actions']) ? $board['actions'] : [];
 $lists = isset($board['lists']) && is_array($board['lists']) ? $board['lists'] : [];
 
-$doneListIds = [];
+$availableListIds = [];
+$boardListsIndex = [];
+$autoCompletedListId = '';
+$currentBoardId = isset($board['id']) ? (string)$board['id'] : '';
+$listPosition = 1;
 foreach ($lists as $list) {
-    $name = isset($list['name']) ? (string)$list['name'] : '';
-    if (preg_match('/(conclu|done|finaliz|pronto|entreg)/i', $name) === 1 && isset($list['id'])) {
-        $doneListIds[(string)$list['id']] = true;
+    $listId = isset($list['id']) ? (string)$list['id'] : '';
+    $listName = isset($list['name']) ? (string)$list['name'] : '';
+    if ($listId === '') {
+        continue;
+    }
+    $availableListIds[$listId] = true;
+    $boardListsIndex[(string)$listPosition] = [
+        'id' => $listId,
+        'name' => $listName,
+    ];
+    if ($autoCompletedListId === '' && preg_match('/(conclu|done|finaliz|pronto|entreg)/i', $listName) === 1) {
+        $autoCompletedListId = $listId;
+    }
+    $listPosition++;
+}
+
+$configChanged = false;
+if (!isset($config['board_lists_index']) || !is_array($config['board_lists_index']) || $config['board_lists_index'] !== $boardListsIndex) {
+    $config['board_lists_index'] = $boardListsIndex;
+    $configChanged = true;
+}
+
+if (!isset($config['demand_lists']) || !is_array($config['demand_lists'])) {
+    $config['demand_lists'] = [
+        'pending_list_ids' => [],
+        'completed_list_ids' => [],
+    ];
+    $configChanged = true;
+}
+if (!isset($config['demand_fields']) || !is_array($config['demand_fields'])) {
+    $config['demand_fields'] = [
+        'todo_list_id' => '',
+        'done_list_id' => '',
+        'board_id' => '',
+    ];
+    $configChanged = true;
+}
+
+$configuredListsBoardId = isset($config['demand_lists_board_id']) ? (string)$config['demand_lists_board_id'] : '';
+$isDifferentBoard = $currentBoardId !== '' && $configuredListsBoardId !== $currentBoardId;
+$quickConfiguredBoardId = isset($config['demand_fields']['board_id']) ? (string)$config['demand_fields']['board_id'] : '';
+$quickConfiguredTodoListId = isset($config['demand_fields']['todo_list_id']) ? (string)$config['demand_fields']['todo_list_id'] : '';
+$quickConfiguredDoneListId = isset($config['demand_fields']['done_list_id']) ? (string)$config['demand_fields']['done_list_id'] : '';
+if ($quickConfiguredTodoListId !== '' && !isset($availableListIds[$quickConfiguredTodoListId])) {
+    $quickConfiguredTodoListId = '';
+}
+if ($quickConfiguredDoneListId !== '' && !isset($availableListIds[$quickConfiguredDoneListId])) {
+    $quickConfiguredDoneListId = '';
+}
+
+$configuredPendingListIds = isset($config['demand_lists']['pending_list_ids']) && is_array($config['demand_lists']['pending_list_ids'])
+    ? array_values(array_filter(array_map('strval', $config['demand_lists']['pending_list_ids']), static function (string $id) use ($availableListIds): bool {
+        return isset($availableListIds[$id]);
+    }))
+    : [];
+$configuredCompletedListIds = [];
+if (isset($config['demand_lists']['completed_list_ids']) && is_array($config['demand_lists']['completed_list_ids'])) {
+    foreach ($config['demand_lists']['completed_list_ids'] as $id) {
+        $id = (string)$id;
+        if ($id !== '' && isset($availableListIds[$id])) {
+            $configuredCompletedListIds[$id] = true;
+        }
+    }
+} elseif (isset($config['demand_lists']['completed_list_id'])) {
+    $singleCompletedId = (string)$config['demand_lists']['completed_list_id'];
+    if ($singleCompletedId !== '' && isset($availableListIds[$singleCompletedId])) {
+        $configuredCompletedListIds[$singleCompletedId] = true;
+    }
+}
+$configuredCompletedListIds = array_keys($configuredCompletedListIds);
+
+if ($isDifferentBoard) {
+    $configuredCompletedListIds = $autoCompletedListId !== '' ? [$autoCompletedListId] : [];
+    $configuredPendingListIds = [];
+    foreach ($availableListIds as $listId => $_) {
+        if (!in_array($listId, $configuredCompletedListIds, true)) {
+            $configuredPendingListIds[] = $listId;
+        }
+    }
+    $configChanged = true;
+} else {
+    if (empty($configuredCompletedListIds) && $autoCompletedListId !== '') {
+        $configuredCompletedListIds = [$autoCompletedListId];
+        $configChanged = true;
+    }
+    if (empty($configuredPendingListIds) && !empty($availableListIds)) {
+        foreach ($availableListIds as $listId => $_) {
+            if (!in_array($listId, $configuredCompletedListIds, true)) {
+                $configuredPendingListIds[] = $listId;
+            }
+        }
+        $configChanged = true;
+    }
+}
+
+if ($hasQuickTodoParam || $hasQuickDoneParam) {
+    $newTodoListId = ($quickTodoListInput !== '' && isset($availableListIds[$quickTodoListInput])) ? $quickTodoListInput : '';
+    $newDoneListId = ($quickDoneListInput !== '' && isset($availableListIds[$quickDoneListInput])) ? $quickDoneListInput : '';
+    if ($newTodoListId !== '' && $newTodoListId === $newDoneListId) {
+        $listConfigError = 'A lista "A fazer" deve ser diferente da lista "Concluídas".';
+    } else {
+        $quickConfiguredTodoListId = $newTodoListId;
+        $quickConfiguredDoneListId = $newDoneListId;
+        $quickConfiguredBoardId = $currentBoardId;
+        $config['demand_fields']['todo_list_id'] = $quickConfiguredTodoListId;
+        $config['demand_fields']['done_list_id'] = $quickConfiguredDoneListId;
+        $config['demand_fields']['board_id'] = $quickConfiguredBoardId;
+        $config['updated_at'] = gmdate('c');
+        if (!saveConfig($configPath, $config)) {
+            $listConfigError = 'Não foi possível salvar a configuração rápida de listas.';
+        } else {
+            $listConfigSuccess = true;
+        }
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_list_config') {
+    $postedPending = isset($_POST['pending_list_ids']) && is_array($_POST['pending_list_ids']) ? $_POST['pending_list_ids'] : [];
+    $postedCompleted = isset($_POST['completed_list_ids']) && is_array($_POST['completed_list_ids']) ? $_POST['completed_list_ids'] : [];
+    $newPendingListIds = [];
+    foreach ($postedPending as $postedId) {
+        $id = (string)$postedId;
+        if ($id !== '' && isset($availableListIds[$id])) {
+            $newPendingListIds[$id] = true;
+        }
+    }
+    $newPendingListIds = array_keys($newPendingListIds);
+
+    $newCompletedListIds = [];
+    foreach ($postedCompleted as $postedId) {
+        $id = (string)$postedId;
+        if ($id !== '' && isset($availableListIds[$id])) {
+            $newCompletedListIds[$id] = true;
+        }
+    }
+    $newCompletedListIds = array_keys($newCompletedListIds);
+
+    $newPendingListIds = array_values(array_filter($newPendingListIds, static function (string $id) use ($newCompletedListIds): bool {
+        return !in_array($id, $newCompletedListIds, true);
+    }));
+
+    $config['demand_lists']['pending_list_ids'] = $newPendingListIds;
+    $config['demand_lists']['completed_list_ids'] = $newCompletedListIds;
+    $config['demand_lists']['completed_list_id'] = $newCompletedListIds[0] ?? '';
+    $config['demand_lists_board_id'] = $currentBoardId;
+    $config['updated_at'] = gmdate('c');
+    if (!saveConfig($configPath, $config)) {
+        $listConfigError = 'Não foi possível salvar a configuração de listas.';
+    } else {
+        $redirectParams = ['config_lists' => 'ok'];
+        $postSourceFile = isset($_POST['source_file']) ? trim((string)$_POST['source_file']) : '';
+        if ($postSourceFile !== '') {
+            $redirectParams['source_file'] = $postSourceFile;
+        }
+        $postStartDate = isset($_POST['start_date']) ? trim((string)$_POST['start_date']) : '';
+        if ($postStartDate !== '') {
+            $redirectParams['start_date'] = $postStartDate;
+        }
+        $postEndDate = isset($_POST['end_date']) ? trim((string)$_POST['end_date']) : '';
+        if ($postEndDate !== '') {
+            $redirectParams['end_date'] = $postEndDate;
+        }
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?' . http_build_query($redirectParams));
+        exit;
+    }
+}
+
+if ($configChanged) {
+    $config['demand_lists']['pending_list_ids'] = $configuredPendingListIds;
+    $config['demand_lists']['completed_list_ids'] = $configuredCompletedListIds;
+    $config['demand_lists']['completed_list_id'] = $configuredCompletedListIds[0] ?? '';
+    $config['demand_lists_board_id'] = $currentBoardId;
+    if ($quickConfiguredBoardId === '' || $quickConfiguredBoardId !== $currentBoardId) {
+        $quickConfiguredBoardId = $currentBoardId;
+        $quickConfiguredDoneListId = $configuredCompletedListIds[0] ?? '';
+        $quickConfiguredTodoListId = $configuredPendingListIds[0] ?? '';
+    }
+    $config['demand_fields']['todo_list_id'] = $quickConfiguredTodoListId;
+    $config['demand_fields']['done_list_id'] = $quickConfiguredDoneListId;
+    $config['demand_fields']['board_id'] = $quickConfiguredBoardId;
+    $config['updated_at'] = gmdate('c');
+    saveConfig($configPath, $config);
+}
+
+$activePendingListIds = $configuredPendingListIds;
+$activeCompletedListIds = $configuredCompletedListIds;
+if ($quickConfiguredBoardId === $currentBoardId) {
+    if ($quickConfiguredTodoListId !== '') {
+        $activePendingListIds = [$quickConfiguredTodoListId];
+    }
+    if ($quickConfiguredDoneListId !== '') {
+        $activeCompletedListIds = [$quickConfiguredDoneListId];
+    }
+}
+
+$doneListIds = [];
+foreach ($activeCompletedListIds as $completedId) {
+    if ($completedId !== '') {
+        $doneListIds[$completedId] = true;
     }
 }
 
@@ -433,10 +639,22 @@ $scopeByDate = [];
 $doneByDate = [];
 $totalDemands = 0;
 $completedDemands = 0;
+$allowedListIds = [];
+foreach ($configuredPendingListIds as $pendingListId) {
+    $allowedListIds[$pendingListId] = true;
+}
+foreach ($doneListIds as $doneListId => $_doneFlag) {
+    $allowedListIds[$doneListId] = true;
+}
+$hasAllowedListFilter = !empty($allowedListIds);
 
 foreach ($cards as $card) {
     $cardId = isset($card['id']) ? (string)$card['id'] : '';
     if ($cardId === '') {
+        continue;
+    }
+    $currentCardListId = isset($card['idList']) ? (string)$card['idList'] : '';
+    if ($hasAllowedListFilter && ($currentCardListId === '' || !isset($allowedListIds[$currentCardListId]))) {
         continue;
     }
 
@@ -483,7 +701,7 @@ foreach ($cards as $card) {
         $scopeByDate[$key]++;
     }
 
-    $listId = isset($card['idList']) ? (string)$card['idList'] : '';
+    $listId = $currentCardListId;
     $isComplete = $listId !== '' && isset($doneListIds[$listId]);
     if ($isComplete) {
         $completedDemands++;
@@ -586,7 +804,6 @@ $displayTotalDemands = $hasDateFilter ? $periodTotalDemands : $totalDemands;
 $displayCompletedDemands = $hasDateFilter ? $periodCompletedDemands : $completedDemands;
 $openDemands = max(0, $displayTotalDemands - $displayCompletedDemands);
 $currentFileName = basename($jsonPath);
-$uploadSuccess = isset($_GET['upload']) && $_GET['upload'] === 'ok';
 $clearFilterParams = [];
 if ($selectedFileRel !== '') {
     $clearFilterParams['source_file'] = $selectedFileRel;
@@ -645,7 +862,7 @@ if (!empty($clearFilterParams)) {
                 <div class="alert alert-danger py-2"><?php echo htmlspecialchars($sourceError, ENT_QUOTES, 'UTF-8'); ?></div>
             <?php endif; ?>
             <form method="get" class="row g-3 align-items-end">
-                <div class="col-md-8">
+                <div class="col-md-12">
                     <label for="source_file" class="form-label">Arquivo JSON disponível</label>
                     <select class="form-select" id="source_file" name="source_file">
                         <?php foreach ($availableFiles as $fileMeta): ?>
@@ -655,10 +872,91 @@ if (!empty($clearFilterParams)) {
                         <?php endforeach; ?>
                     </select>
                 </div>
+                <div class="col-md-4">
+                    <label for="todo_list_id" class="form-label">Coluna "A fazer"</label>
+                    <select class="form-select" id="todo_list_id" name="todo_list_id">
+                        <option value="">-- Não definida --</option>
+                        <?php foreach ($boardListsIndex as $indexKey => $listMeta): ?>
+                            <option value="<?php echo htmlspecialchars($listMeta['id'], ENT_QUOTES, 'UTF-8'); ?>" <?php echo $quickConfiguredTodoListId === $listMeta['id'] ? 'selected' : ''; ?>>
+                                [<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>] <?php echo htmlspecialchars($listMeta['name'], ENT_QUOTES, 'UTF-8'); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label for="done_list_id" class="form-label">Coluna "Concluídas"</label>
+                    <select class="form-select" id="done_list_id" name="done_list_id">
+                        <option value="">-- Não definida --</option>
+                        <?php foreach ($boardListsIndex as $indexKey => $listMeta): ?>
+                            <option value="<?php echo htmlspecialchars($listMeta['id'], ENT_QUOTES, 'UTF-8'); ?>" <?php echo $quickConfiguredDoneListId === $listMeta['id'] ? 'selected' : ''; ?>>
+                                [<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>] <?php echo htmlspecialchars($listMeta['name'], ENT_QUOTES, 'UTF-8'); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
                 <input type="hidden" name="start_date" value="<?php echo htmlspecialchars($filterStartInput, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="end_date" value="<?php echo htmlspecialchars($filterEndInput, ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="col-md-4 d-grid">
                     <button class="btn btn-primary" type="submit">Usar arquivo selecionado</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="h5 mb-3">Configuração de listas de demanda</h2>
+            <div class="text-muted small mb-2">
+                Board atual: <strong><?php echo htmlspecialchars($boardName, ENT_QUOTES, 'UTF-8'); ?></strong>
+            </div>
+            <?php if ($listConfigSuccess): ?>
+                <div class="alert alert-success py-2">Configuração de listas salva com sucesso.</div>
+            <?php endif; ?>
+            <?php if ($listConfigError !== null): ?>
+                <div class="alert alert-danger py-2"><?php echo htmlspecialchars($listConfigError, ENT_QUOTES, 'UTF-8'); ?></div>
+            <?php endif; ?>
+            <form method="post" class="row g-3">
+                <input type="hidden" name="action" value="save_list_config">
+                <input type="hidden" name="source_file" value="<?php echo htmlspecialchars($selectedFileRel, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="start_date" value="<?php echo htmlspecialchars($filterStartInput, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="end_date" value="<?php echo htmlspecialchars($filterEndInput, ENT_QUOTES, 'UTF-8'); ?>">
+
+                <div class="col-12">
+                    <label class="form-label">Listas que contarão como pendentes</label>
+                    <div class="row g-2">
+                        <?php foreach ($boardListsIndex as $indexKey => $listMeta): ?>
+                            <?php $isPendingChecked = in_array($listMeta['id'], $configuredPendingListIds, true); ?>
+                            <div class="col-12 col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="pending_<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>" name="pending_list_ids[]" value="<?php echo htmlspecialchars($listMeta['id'], ENT_QUOTES, 'UTF-8'); ?>" <?php echo $isPendingChecked ? 'checked' : ''; ?>>
+                                    <label class="form-check-label" for="pending_<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>">
+                                        [<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>] <?php echo htmlspecialchars($listMeta['name'], ENT_QUOTES, 'UTF-8'); ?>
+                                    </label>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label">Listas que contarão como concluídas</label>
+                    <div class="row g-2">
+                        <?php foreach ($boardListsIndex as $indexKey => $listMeta): ?>
+                            <?php $isCompletedChecked = in_array($listMeta['id'], $configuredCompletedListIds, true); ?>
+                            <div class="col-12 col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="completed_<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>" name="completed_list_ids[]" value="<?php echo htmlspecialchars($listMeta['id'], ENT_QUOTES, 'UTF-8'); ?>" <?php echo $isCompletedChecked ? 'checked' : ''; ?>>
+                                    <label class="form-check-label" for="completed_<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>">
+                                        [<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>] <?php echo htmlspecialchars($listMeta['name'], ENT_QUOTES, 'UTF-8'); ?>
+                                    </label>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-3 d-grid align-self-end">
+                    <button class="btn btn-primary" type="submit">Salvar configuração</button>
                 </div>
             </form>
         </div>

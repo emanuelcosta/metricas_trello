@@ -1,4 +1,44 @@
 {
     "latest_uploaded_file": "uploads/trello_20260512_201301_Lgwv271P_-_licitacao__1_.json",
-    "updated_at": "2026-05-12T18:19:49+00:00"
+    "updated_at": "2026-05-12T18:56:46+00:00",
+    "board_lists_index": {
+        "1": {
+            "id": "69d4e78912d64b9b16ac726c",
+            "name": "Backlog"
+        },
+        "2": {
+            "id": "69d4e79592956b2d71b0d7b0",
+            "name": "Priorizadas"
+        },
+        "3": {
+            "id": "69d4e79f5f2c78f10f89e18c",
+            "name": "Em andamento"
+        },
+        "4": {
+            "id": "69d4e7d44ceb2be2106579d9",
+            "name": "Impedidas"
+        },
+        "5": {
+            "id": "69d4e7df65f4804f9c7d1cdf",
+            "name": "Concluídas"
+        }
+    },
+    "demand_lists": {
+        "pending_list_ids": [
+            "69d4e78912d64b9b16ac726c",
+            "69d4e79592956b2d71b0d7b0",
+            "69d4e79f5f2c78f10f89e18c",
+            "69d4e7d44ceb2be2106579d9"
+        ],
+        "completed_list_id": "69d4e7df65f4804f9c7d1cdf",
+        "completed_list_ids": [
+            "69d4e7df65f4804f9c7d1cdf"
+        ]
+    },
+    "demand_lists_board_id": "65030943a399df3b54a82895",
+    "demand_fields": {
+        "todo_list_id": "",
+        "done_list_id": "",
+        "board_id": "65030943a399df3b54a82895"
+    }
 }
