@@ -997,7 +997,7 @@ usort($inProgressCards, static function (array $a, array $b): int {
             height: 320px;
         }
         .cursor-pointer { cursor: pointer; }
-        tr[data-bs-toggle="collapse"][aria-expanded="true"] .collapse-icon { transform: rotate(90deg); }
+        tr[aria-expanded="true"] .collapse-icon { transform: rotate(90deg); }
     </style>
 </head>
 <body class="bg-light">
@@ -1266,7 +1266,8 @@ usort($inProgressCards, static function (array $a, array $b): int {
                         ?>
                         <tr class="<?php echo $hasChecklists ? 'cursor-pointer' : ''; ?>"
                             <?php if ($hasChecklists): ?>
-                            data-bs-toggle="collapse" data-bs-target="#<?php echo $collapseId; ?>" aria-expanded="false"
+                            onclick="var el=document.getElementById('<?php echo $collapseId; ?>'); var isOpen=el.classList.contains('show'); bootstrap.Collapse.getOrCreateInstance(el).toggle(); this.setAttribute('aria-expanded', isOpen ? 'false' : 'true');"
+                            aria-expanded="false"
                             <?php endif; ?>>
                             <td class="fw-medium">
                                 <div class="d-flex align-items-center gap-2">
@@ -1339,6 +1340,7 @@ usort($inProgressCards, static function (array $a, array $b): int {
     </div>
 </div>
 
+<script src="assets/bootstrap/bootstrap.bundle.min.js"></script>
 <script src="assets/chartjs/chart.umd.min.js"></script>
 <script>
 const labels = <?php echo json_encode($chartLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;

@@ -1,63 +1,46 @@
 {
-    "latest_uploaded_file": "uploads/trello_2026-05-13_12-11-16_clohx19c__1_.json",
-    "updated_at": "2026-05-13T10:19:46+00:00",
+    "latest_uploaded_file": "uploads/trello_2026-05-13_14-57-43_Lgwv271P_-_licitacao__2_.json",
+    "updated_at": "2026-05-13T13:10:05+00:00",
     "board_lists_index": {
         "1": {
-            "id": "69b5e8a3cb81115fff2c17e6",
-            "name": "Backlog (POSSÍVEIS IMPLEMENTAÇÕES)"
+            "id": "69d4e78912d64b9b16ac726c",
+            "name": "Backlog"
         },
         "2": {
-            "id": "69b0aed2f337bc56e8c5841b",
-            "name": "A fazer ( A FAZER MAS NAO AGORA)"
+            "id": "69d4e79592956b2d71b0d7b0",
+            "name": "Priorizadas"
         },
         "3": {
-            "id": "69c14661996d5067c47188af",
-            "name": "PRIMEIRA VERSAO DO APP (A FAZER AGORA)"
+            "id": "69d4e79f5f2c78f10f89e18c",
+            "name": "Em andamento"
         },
         "4": {
-            "id": "69b0aed6959e93cafbc975bc",
-            "name": "Fazendo (em andamento)"
+            "id": "69d4e7d44ceb2be2106579d9",
+            "name": "Impedidas"
         },
         "5": {
-            "id": "69b0aeda88e64c19ce1e6b43",
-            "name": "Impedimentos"
-        },
-        "6": {
-            "id": "69b0aed7b15552ce641c8dc8",
-            "name": "Feito"
-        },
-        "7": {
-            "id": "69b0aee43eae799305257776",
-            "name": "Em produção (precisa testar)"
-        },
-        "8": {
-            "id": "69b0aefa387772641a6372b2",
-            "name": "Em teste (testando)"
-        },
-        "9": {
-            "id": "69b5d11df1570a0ff8f78475",
-            "name": "Testado"
+            "id": "69d4e7df65f4804f9c7d1cdf",
+            "name": "Concluídas"
         }
     },
     "demand_lists": {
         "pending_list_ids": [
-            "69c14661996d5067c47188af"
+            "69d4e79592956b2d71b0d7b0",
+            "69d4e79f5f2c78f10f89e18c",
+            "69d4e7d44ceb2be2106579d9"
         ],
-        "completed_list_id": "69b0aed7b15552ce641c8dc8",
+        "completed_list_id": "69d4e7df65f4804f9c7d1cdf",
         "completed_list_ids": [
-            "69b0aed7b15552ce641c8dc8",
-            "69b0aee43eae799305257776",
-            "69b0aefa387772641a6372b2",
-            "69b5d11df1570a0ff8f78475"
+            "69d4e7df65f4804f9c7d1cdf"
         ],
         "in_progress_list_ids": [
-            "69b0aed6959e93cafbc975bc"
+            "69d4e79f5f2c78f10f89e18c"
         ]
     },
-    "demand_lists_board_id": "69b0aeceee51a805bcb699a5",
+    "demand_lists_board_id": "65030943a399df3b54a82895",
     "demand_fields": {
-        "todo_list_id": "69b5e8a3cb81115fff2c17e6",
-        "done_list_id": "",
-        "board_id": "69b0aeceee51a805bcb699a5"
+        "todo_list_id": "69d4e78912d64b9b16ac726c",
+        "done_list_id": "69d4e7df65f4804f9c7d1cdf",
+        "board_id": "65030943a399df3b54a82895"
     }
 }
