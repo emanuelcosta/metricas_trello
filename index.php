@@ -179,6 +179,8 @@ $quickDoneListInput = $hasQuickDoneParam ? trim((string)$_GET['done_list_id']) :
 $sourceError = null;
 $listConfigSuccess = isset($_GET['config_lists']) && $_GET['config_lists'] === 'ok';
 $uploadSuccess = isset($_GET['upload']) && $_GET['upload'] === 'ok';
+$deleteSuccess = isset($_GET['deleted']) && $_GET['deleted'] === 'ok';
+$deleteError = null;
 
 $config = loadConfig($configPath);
 if (empty($config)) {
@@ -189,7 +191,7 @@ if (empty($config)) {
     saveConfig($configPath, $config);
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (!isset($_POST['action']) || $_POST['action'] !== 'save_list_config')) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (!isset($_POST['action']) || ($_POST['action'] !== 'save_list_config' && $_POST['action'] !== 'delete_file'))) {
     if (!isset($_FILES['trello_json']) || !is_array($_FILES['trello_json'])) {
         $uploadError = 'Nenhum arquivo foi enviado.';
     } elseif (!isset($_FILES['trello_json']['error']) || $_FILES['trello_json']['error'] !== UPLOAD_ERR_OK) {
@@ -420,6 +422,7 @@ if (!isset($config['demand_lists']) || !is_array($config['demand_lists'])) {
     $config['demand_lists'] = [
         'pending_list_ids' => [],
         'completed_list_ids' => [],
+        'in_progress_list_ids' => [],
     ];
     $configChanged = true;
 }
@@ -465,6 +468,12 @@ if (isset($config['demand_lists']['completed_list_ids']) && is_array($config['de
 }
 $configuredCompletedListIds = array_keys($configuredCompletedListIds);
 
+$configuredInProgressListIds = isset($config['demand_lists']['in_progress_list_ids']) && is_array($config['demand_lists']['in_progress_list_ids'])
+    ? array_values(array_filter(array_map('strval', $config['demand_lists']['in_progress_list_ids']), static function (string $id) use ($availableListIds): bool {
+        return isset($availableListIds[$id]);
+    }))
+    : [];
+
 if ($isDifferentBoard) {
     $configuredCompletedListIds = $autoCompletedListId !== '' ? [$autoCompletedListId] : [];
     $configuredPendingListIds = [];
@@ -473,6 +482,7 @@ if ($isDifferentBoard) {
             $configuredPendingListIds[] = $listId;
         }
     }
+    $configuredInProgressListIds = $configuredPendingListIds;
     $configChanged = true;
 } else {
     if (empty($configuredCompletedListIds) && $autoCompletedListId !== '') {
@@ -485,6 +495,10 @@ if ($isDifferentBoard) {
                 $configuredPendingListIds[] = $listId;
             }
         }
+        $configChanged = true;
+    }
+    if (empty($configuredInProgressListIds) && !empty($configuredPendingListIds)) {
+        $configuredInProgressListIds = $configuredPendingListIds;
         $configChanged = true;
     }
 }
@@ -535,9 +549,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         return !in_array($id, $newCompletedListIds, true);
     }));
 
+    $postedInProgress = isset($_POST['in_progress_list_ids']) && is_array($_POST['in_progress_list_ids']) ? $_POST['in_progress_list_ids'] : [];
+    $newInProgressListIds = [];
+    foreach ($postedInProgress as $postedId) {
+        $id = (string)$postedId;
+        if ($id !== '' && isset($availableListIds[$id])) {
+            $newInProgressListIds[$id] = true;
+        }
+    }
+    $newInProgressListIds = array_keys($newInProgressListIds);
+
     $config['demand_lists']['pending_list_ids'] = $newPendingListIds;
     $config['demand_lists']['completed_list_ids'] = $newCompletedListIds;
     $config['demand_lists']['completed_list_id'] = $newCompletedListIds[0] ?? '';
+    $config['demand_lists']['in_progress_list_ids'] = $newInProgressListIds;
     $config['demand_lists_board_id'] = $currentBoardId;
     $config['updated_at'] = gmdate('c');
     if (!saveConfig($configPath, $config)) {
@@ -561,10 +586,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_file') {
+    $fileNameRaw = isset($_POST['file_name']) ? trim((string)$_POST['file_name']) : '';
+    $fileNameSafe = basename($fileNameRaw);
+    if ($fileNameSafe === '' || $fileNameSafe === 'dados.json') {
+        $deleteError = 'Arquivo inválido para exclusão.';
+    } else {
+        $targetPath = $uploadsDir . DIRECTORY_SEPARATOR . $fileNameSafe;
+        $relPath = 'uploads/' . $fileNameSafe;
+        if (!is_file($targetPath)) {
+            $deleteError = 'Arquivo não encontrado.';
+        } elseif (!unlink($targetPath)) {
+            $deleteError = 'Não foi possível excluir o arquivo.';
+        } else {
+            $configuredLatest = isset($config['latest_uploaded_file']) ? str_replace('\\', '/', (string)$config['latest_uploaded_file']) : '';
+            if ($configuredLatest === $relPath) {
+                $config['latest_uploaded_file'] = 'dados.json';
+                $config['updated_at'] = gmdate('c');
+                saveConfig($configPath, $config);
+            }
+            $redirectParams = ['deleted' => 'ok'];
+            $postSourceFile = isset($_POST['source_file']) ? trim((string)$_POST['source_file']) : '';
+            if ($postSourceFile !== '' && $postSourceFile !== $relPath) {
+                $redirectParams['source_file'] = $postSourceFile;
+            }
+            $postStartDate = isset($_POST['start_date']) ? trim((string)$_POST['start_date']) : '';
+            if ($postStartDate !== '') {
+                $redirectParams['start_date'] = $postStartDate;
+            }
+            $postEndDate = isset($_POST['end_date']) ? trim((string)$_POST['end_date']) : '';
+            if ($postEndDate !== '') {
+                $redirectParams['end_date'] = $postEndDate;
+            }
+            header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?' . http_build_query($redirectParams));
+            exit;
+        }
+    }
+}
+
 if ($configChanged) {
     $config['demand_lists']['pending_list_ids'] = $configuredPendingListIds;
     $config['demand_lists']['completed_list_ids'] = $configuredCompletedListIds;
     $config['demand_lists']['completed_list_id'] = $configuredCompletedListIds[0] ?? '';
+    $config['demand_lists']['in_progress_list_ids'] = $configuredInProgressListIds;
     $config['demand_lists_board_id'] = $currentBoardId;
     if ($quickConfiguredBoardId === '' || $quickConfiguredBoardId !== $currentBoardId) {
         $quickConfiguredBoardId = $currentBoardId;
@@ -844,6 +908,80 @@ $clearFilterUrl = strtok($_SERVER['REQUEST_URI'], '?');
 if (!empty($clearFilterParams)) {
     $clearFilterUrl .= '?' . http_build_query($clearFilterParams);
 }
+
+$listNamesById = [];
+foreach ($boardListsIndex as $listMeta) {
+    if (isset($listMeta['id'], $listMeta['name'])) {
+        $listNamesById[$listMeta['id']] = $listMeta['name'];
+    }
+}
+
+$inProgressListIdsMap = [];
+foreach ($configuredInProgressListIds as $inProgressId) {
+    $inProgressListIdsMap[$inProgressId] = true;
+}
+
+$checklistsGroupedByCard = [];
+foreach ($checklists as $checklist) {
+    $clCardId = isset($checklist['idCard']) ? (string)$checklist['idCard'] : '';
+    if ($clCardId === '') {
+        continue;
+    }
+    $clName = isset($checklist['name']) ? trim((string)$checklist['name']) : '';
+    $clRawItems = isset($checklist['checkItems']) && is_array($checklist['checkItems']) ? $checklist['checkItems'] : [];
+    $clItems = [];
+    foreach ($clRawItems as $clItem) {
+        $clItems[] = [
+            'id'    => isset($clItem['id']) ? (string)$clItem['id'] : '',
+            'name'  => isset($clItem['name']) ? trim((string)$clItem['name']) : '',
+            'state' => isset($clItem['state']) ? (string)$clItem['state'] : 'incomplete',
+        ];
+    }
+    $checklistsGroupedByCard[$clCardId][] = [
+        'name'  => $clName,
+        'items' => $clItems,
+    ];
+}
+
+$inProgressCards = [];
+foreach ($cards as $card) {
+    $cardId = isset($card['id']) ? (string)$card['id'] : '';
+    $currentCardListId = isset($card['idList']) ? (string)$card['idList'] : '';
+    if ($cardId === '' || $currentCardListId === '' || !isset($inProgressListIdsMap[$currentCardListId])) {
+        continue;
+    }
+    $cardName = isset($card['name']) ? trim((string)$card['name']) : '';
+    $cardShortLink = isset($card['shortLink']) ? trim((string)$card['shortLink']) : '';
+    $cardListName = isset($listNamesById[$currentCardListId]) ? $listNamesById[$currentCardListId] : $currentCardListId;
+    $cardLastActivity = isset($card['dateLastActivity']) ? (string)$card['dateLastActivity'] : '';
+
+    $checkTotal = isset($checkItemsByCard[$cardId]) ? (int)$checkItemsByCard[$cardId] : 0;
+    $checkDone = 0;
+    if ($checkTotal > 0 && isset($checkItemsDataByCard[$cardId])) {
+        foreach ($checkItemsDataByCard[$cardId] as $item) {
+            if (isset($item['state']) && $item['state'] === 'complete') {
+                $checkDone++;
+            }
+        }
+    }
+
+    $inProgressCards[] = [
+        'id'          => $cardId,
+        'name'        => $cardName,
+        'list_name'   => $cardListName,
+        'short_link'  => $cardShortLink,
+        'last_activity' => $cardLastActivity,
+        'check_total' => $checkTotal,
+        'check_done'  => $checkDone,
+        'check_lists' => isset($checklistsGroupedByCard[$cardId]) ? $checklistsGroupedByCard[$cardId] : [],
+    ];
+}
+
+usort($inProgressCards, static function (array $a, array $b): int {
+    $ta = $a['last_activity'] !== '' ? strtotime($a['last_activity']) : 0;
+    $tb = $b['last_activity'] !== '' ? strtotime($b['last_activity']) : 0;
+    return $tb <=> $ta;
+});
 ?>
 <!doctype html>
 <html lang="pt-br">
@@ -858,6 +996,8 @@ if (!empty($clearFilterParams)) {
             position: relative;
             height: 320px;
         }
+        .cursor-pointer { cursor: pointer; }
+        tr[data-bs-toggle="collapse"][aria-expanded="true"] .collapse-icon { transform: rotate(90deg); }
     </style>
 </head>
 <body class="bg-light">
@@ -891,6 +1031,12 @@ if (!empty($clearFilterParams)) {
     <div class="card shadow-sm mb-4">
         <div class="card-body">
             <h2 class="h5 mb-3">Arquivos JSON disponíveis</h2>
+            <?php if ($deleteSuccess): ?>
+                <div class="alert alert-success py-2">Arquivo excluído com sucesso.</div>
+            <?php endif; ?>
+            <?php if ($deleteError !== null): ?>
+                <div class="alert alert-danger py-2"><?php echo htmlspecialchars($deleteError, ENT_QUOTES, 'UTF-8'); ?></div>
+            <?php endif; ?>
             <?php if ($sourceError !== null): ?>
                 <div class="alert alert-danger py-2"><?php echo htmlspecialchars($sourceError, ENT_QUOTES, 'UTF-8'); ?></div>
             <?php endif; ?>
@@ -919,6 +1065,18 @@ if (!empty($clearFilterParams)) {
                     <a href="<?php echo $fileMeta['short_url'].'.json'; ?>" class="btn btn-sm btn-outline-success flex-shrink-0" title="Baixar JSON atualizado do Trello" download="file.json">
                         <i class="fa-solid fa-download"></i>
                     </a>
+                    <?php endif; ?>
+                    <?php if ($fileMeta['path'] !== 'dados.json'): ?>
+                    <form method="post" class="flex-shrink-0" onsubmit="return confirm('Excluir o arquivo «<?php echo htmlspecialchars(basename($fileMeta['path']), ENT_QUOTES, 'UTF-8'); ?>»? Esta ação não pode ser desfeita.');">
+                        <input type="hidden" name="action" value="delete_file">
+                        <input type="hidden" name="file_name" value="<?php echo htmlspecialchars(basename($fileMeta['path']), ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="source_file" value="<?php echo htmlspecialchars($selectedFileRel, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="start_date" value="<?php echo htmlspecialchars($filterStartInput, ENT_QUOTES, 'UTF-8'); ?>">
+                        <input type="hidden" name="end_date" value="<?php echo htmlspecialchars($filterEndInput, ENT_QUOTES, 'UTF-8'); ?>">
+                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Excluir arquivo">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </form>
                     <?php endif; ?>
                 </div>
                 <?php endforeach; ?>
@@ -970,6 +1128,24 @@ if (!empty($clearFilterParams)) {
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="completed_<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>" name="completed_list_ids[]" value="<?php echo htmlspecialchars($listMeta['id'], ENT_QUOTES, 'UTF-8'); ?>" <?php echo $isCompletedChecked ? 'checked' : ''; ?>>
                                     <label class="form-check-label" for="completed_<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>">
+                                        [<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>] <?php echo htmlspecialchars($listMeta['name'], ENT_QUOTES, 'UTF-8'); ?>
+                                    </label>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label">Listas exibidas em "Atividades em andamento"</label>
+                    <div class="form-text mb-2">Cartões dessas listas aparecem na tabela abaixo dos gráficos.</div>
+                    <div class="row g-2">
+                        <?php foreach ($boardListsIndex as $indexKey => $listMeta): ?>
+                            <?php $isInProgressChecked = in_array($listMeta['id'], $configuredInProgressListIds, true); ?>
+                            <div class="col-12 col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="inprogress_<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>" name="in_progress_list_ids[]" value="<?php echo htmlspecialchars($listMeta['id'], ENT_QUOTES, 'UTF-8'); ?>" <?php echo $isInProgressChecked ? 'checked' : ''; ?>>
+                                    <label class="form-check-label" for="inprogress_<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>">
                                         [<?php echo htmlspecialchars((string)$indexKey, ENT_QUOTES, 'UTF-8'); ?>] <?php echo htmlspecialchars($listMeta['name'], ENT_QUOTES, 'UTF-8'); ?>
                                     </label>
                                 </div>
@@ -1055,6 +1231,110 @@ if (!empty($clearFilterParams)) {
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mt-4 mb-4">
+        <div class="card-body">
+            <h2 class="h5 mb-3">Atividades em andamento <span class="badge bg-secondary"><?php echo count($inProgressCards); ?></span></h2>
+            <?php if (empty($inProgressCards)): ?>
+                <p class="text-muted small mb-0">Nenhuma atividade em andamento nas listas configuradas como pendentes.</p>
+            <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Cartão</th>
+                            <th>Lista</th>
+                            <th>Checklist</th>
+                            <th>Última atividade</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($inProgressCards as $inCard):
+                            $cardUrl = $inCard['short_link'] !== '' ? 'https://trello.com/c/' . $inCard['short_link'] : '';
+                            $hasChecklists = !empty($inCard['check_lists']);
+                            $collapseId = 'cl-' . htmlspecialchars($inCard['id'], ENT_QUOTES, 'UTF-8');
+                            $checkLabel = '';
+                            if ($inCard['check_total'] > 0) {
+                                $pct = (int)round(($inCard['check_done'] / $inCard['check_total']) * 100);
+                                $checkLabel = $inCard['check_done'] . '/' . $inCard['check_total'] . ' (' . $pct . '%)';
+                            }
+                            $lastActFormatted = $inCard['last_activity'] !== ''
+                                ? htmlspecialchars(gmdate('d/m/Y H:i', strtotime($inCard['last_activity'])), ENT_QUOTES, 'UTF-8') . ' UTC'
+                                : '-';
+                        ?>
+                        <tr class="<?php echo $hasChecklists ? 'cursor-pointer' : ''; ?>"
+                            <?php if ($hasChecklists): ?>
+                            data-bs-toggle="collapse" data-bs-target="#<?php echo $collapseId; ?>" aria-expanded="false"
+                            <?php endif; ?>>
+                            <td class="fw-medium">
+                                <div class="d-flex align-items-center gap-2">
+                                    <?php if ($hasChecklists): ?>
+                                    <i class="fa-solid fa-chevron-right fa-xs text-muted collapse-icon" style="transition:transform .2s;"></i>
+                                    <?php endif; ?>
+                                    <?php if ($cardUrl !== ''): ?>
+                                    <a href="<?php echo htmlspecialchars($cardUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer" class="text-decoration-none" onclick="event.stopPropagation()">
+                                        <?php echo htmlspecialchars($inCard['name'], ENT_QUOTES, 'UTF-8'); ?>
+                                        <i class="fa-solid fa-arrow-up-right-from-square fa-xs text-muted ms-1"></i>
+                                    </a>
+                                    <?php else: ?>
+                                    <span><?php echo htmlspecialchars($inCard['name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <?php endif; ?>
+                                </div>
+                            </td>
+                            <td class="text-muted small"><?php echo htmlspecialchars($inCard['list_name'], ENT_QUOTES, 'UTF-8'); ?></td>
+                            <td class="small">
+                                <?php if ($checkLabel !== ''): ?>
+                                <div class="d-flex align-items-center gap-2">
+                                    <div class="progress flex-grow-1" style="height:6px;min-width:60px;">
+                                        <div class="progress-bar" role="progressbar" style="width:<?php echo $pct; ?>%"></div>
+                                    </div>
+                                    <span class="text-muted"><?php echo htmlspecialchars($checkLabel, ENT_QUOTES, 'UTF-8'); ?></span>
+                                </div>
+                                <?php else: ?>
+                                <span class="text-muted">—</span>
+                                <?php endif; ?>
+                            </td>
+                            <td class="text-muted small"><?php echo $lastActFormatted; ?></td>
+                        </tr>
+                        <?php if ($hasChecklists): ?>
+                        <tr>
+                            <td colspan="4" class="p-0 border-0">
+                                <div class="collapse" id="<?php echo $collapseId; ?>">
+                                    <div class="bg-light py-2 px-4">
+                                        <?php foreach ($inCard['check_lists'] as $cl): ?>
+                                        <?php if (!empty($cl['name'])): ?>
+                                        <div class="fw-semibold small text-muted mb-1 mt-2">
+                                            <i class="fa-regular fa-square-check me-1"></i><?php echo htmlspecialchars($cl['name'], ENT_QUOTES, 'UTF-8'); ?>
+                                        </div>
+                                        <?php endif; ?>
+                                        <ul class="list-unstyled mb-1 ms-2">
+                                            <?php foreach ($cl['items'] as $clItem):
+                                                $isDone = $clItem['state'] === 'complete';
+                                            ?>
+                                            <li class="small py-1 d-flex align-items-start gap-2">
+                                                <?php if ($isDone): ?>
+                                                <i class="fa-solid fa-circle-check text-success mt-1 flex-shrink-0"></i>
+                                                <span class="text-muted text-decoration-line-through"><?php echo htmlspecialchars($clItem['name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                                <?php else: ?>
+                                                <i class="fa-regular fa-circle mt-1 flex-shrink-0 text-secondary"></i>
+                                                <span><?php echo htmlspecialchars($clItem['name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                                                <?php endif; ?>
+                                            </li>
+                                            <?php endforeach; ?>
+                                        </ul>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        <?php endif; ?>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>
