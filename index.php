@@ -899,6 +899,8 @@ $cardsCount = count($cards);
 $displayTotalDemands = $hasDateFilter ? $periodTotalDemands : $totalDemands;
 $displayCompletedDemands = $hasDateFilter ? $periodCompletedDemands : $completedDemands;
 $openDemands = max(0, $displayTotalDemands - $displayCompletedDemands);
+$projectProgress = $displayTotalDemands > 0 ? round(($displayCompletedDemands / $displayTotalDemands) * 100, 2) : 0;
+$projectProgress .= '%';
 $currentFileName = basename($jsonPath);
 $clearFilterParams = [];
 if ($selectedFileRel !== '') {
@@ -1207,6 +1209,7 @@ usort($inProgressCards, static function (array $a, array $b): int {
                 <div class="col-md-4"><strong>Demandas concluídas<?php echo $hasDateFilter ? ' (período)' : ''; ?>:</strong> <?php echo $displayCompletedDemands; ?></div>
                 <div class="col-md-4"><strong>Demandas em aberto:</strong> <?php echo $openDemands; ?></div>
                 <div class="col-md-8"><strong>URL:</strong> <a href="<?php echo htmlspecialchars($boardUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer"><?php echo htmlspecialchars($boardUrl, ENT_QUOTES, 'UTF-8'); ?></a></div>
+                <div class="col-md-8"><strong>Progresso do Projeto:</strong> <?php echo $projectProgress; ?></div>
             </div>
         </div>
     </div>
