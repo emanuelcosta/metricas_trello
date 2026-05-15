@@ -1,6 +1,6 @@
 {
-    "latest_uploaded_file": "uploads/trello_2026-05-13_14-57-43_Lgwv271P_-_licitacao__2_.json",
-    "updated_at": "2026-05-13T13:10:05+00:00",
+    "latest_uploaded_file": "uploads/trello_2026-05-15_14-48-08_Lgwv271P_-_licitacao__3_.json",
+    "updated_at": "2026-05-15T13:03:49+00:00",
     "board_lists_index": {
         "1": {
             "id": "69d4e78912d64b9b16ac726c",
@@ -25,9 +25,7 @@
     },
     "demand_lists": {
         "pending_list_ids": [
-            "69d4e79592956b2d71b0d7b0",
-            "69d4e79f5f2c78f10f89e18c",
-            "69d4e7d44ceb2be2106579d9"
+            "69d4e79592956b2d71b0d7b0"
         ],
         "completed_list_id": "69d4e7df65f4804f9c7d1cdf",
         "completed_list_ids": [
@@ -39,8 +37,8 @@
     },
     "demand_lists_board_id": "65030943a399df3b54a82895",
     "demand_fields": {
-        "todo_list_id": "69d4e78912d64b9b16ac726c",
-        "done_list_id": "69d4e7df65f4804f9c7d1cdf",
+        "todo_list_id": "69d4e79f5f2c78f10f89e18c",
+        "done_list_id": "",
         "board_id": "65030943a399df3b54a82895"
     }
 }

@@ -169,6 +169,8 @@ function saveUploadsIndex(string $uploadsDir, string $indexPath): bool
 
 $uploadError = null;
 $listConfigError = null;
+$updateListNamesSuccess = isset($_GET['refresh_lists']) && $_GET['refresh_lists'] === 'ok';
+$updateListNamesError = null;
 $filterStartInput = isset($_GET['start_date']) ? trim((string)$_GET['start_date']) : '';
 $filterEndInput = isset($_GET['end_date']) ? trim((string)$_GET['end_date']) : '';
 $sourceFileInput = isset($_GET['source_file']) ? trim((string)$_GET['source_file']) : '';
@@ -385,6 +387,32 @@ if ($filterError === null && $filterStartInput !== '' && $filterEndInput !== '' 
 }
 $hasDateFilter = $filterError === null && ($filterStartInput !== '' || $filterEndInput !== '');
 
+// Se o JSON é apenas um card (com chaves como 'idBoard', 'idList', 'checklists'), extrair dados dele
+if (isset($board['idBoard']) && !isset($board['lists'])) {
+    // Arquivo é apenas um card - construir estrutura de board
+    $card = $board;
+    
+    // Processar checklists: se existirem, usar; caso contrário criar estrutura vazia
+    $processedChecklists = [];
+    if (isset($card['checklists']) && is_array($card['checklists'])) {
+        $processedChecklists = $card['checklists'];
+    }
+    
+    $board = [
+        'id' => $card['idBoard'] ?? '',
+        'name' => $card['name'] ?? 'Unknown Board',
+        'lists' => [
+            [
+                'id' => $card['idList'] ?? 'unknown',
+                'name' => 'Card List',
+            ]
+        ],
+        'cards' => isset($card['id']) ? [$card] : [],
+        'checklists' => $processedChecklists,
+        'actions' => isset($card['actions']) && is_array($card['actions']) ? $card['actions'] : [],
+    ];
+}
+
 $cards = isset($board['cards']) && is_array($board['cards']) ? $board['cards'] : [];
 $checklists = isset($board['checklists']) && is_array($board['checklists']) ? $board['checklists'] : [];
 $actions = isset($board['actions']) && is_array($board['actions']) ? $board['actions'] : [];
@@ -586,6 +614,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'refresh_list_names') {
+    // Atualiza os nomes das listas do JSON atual para a configuração
+    $config['board_lists_index'] = $boardListsIndex;
+    $config['demand_lists_board_id'] = $currentBoardId;
+    $config['updated_at'] = gmdate('c');
+    
+    if (!saveConfig($configPath, $config)) {
+        $updateListNamesError = 'Não foi possível atualizar os nomes das listas.';
+    } else {
+        $redirectParams = ['refresh_lists' => 'ok'];
+        $postSourceFile = isset($_POST['source_file']) ? trim((string)$_POST['source_file']) : '';
+        if ($postSourceFile !== '') {
+            $redirectParams['source_file'] = $postSourceFile;
+        }
+        $postStartDate = isset($_POST['start_date']) ? trim((string)$_POST['start_date']) : '';
+        if ($postStartDate !== '') {
+            $redirectParams['start_date'] = $postStartDate;
+        }
+        $postEndDate = isset($_POST['end_date']) ? trim((string)$_POST['end_date']) : '';
+        if ($postEndDate !== '') {
+            $redirectParams['end_date'] = $postEndDate;
+        }
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?') . '?' . http_build_query($redirectParams));
+        exit;
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_file') {
     $fileNameRaw = isset($_POST['file_name']) ? trim((string)$_POST['file_name']) : '';
     $fileNameSafe = basename($fileNameRaw);
@@ -659,6 +714,15 @@ foreach ($activeCompletedListIds as $completedId) {
         $doneListIds[$completedId] = true;
     }
 }
+
+// Debug: registrar informações de configuração
+$debugConfig = [
+    'activeCompletedListIds' => $activeCompletedListIds,
+    'activePendingListIds' => $activePendingListIds,
+    'doneListIds' => $doneListIds,
+    'cardsCount' => count($cards),
+    'checklistsCount' => count($checklists),
+];
 
 $checkItemsByCard = [];
 $checkItemsDataByCard = [];
@@ -750,8 +814,11 @@ foreach ($cards as $card) {
         continue;
     }
     $currentCardListId = isset($card['idList']) ? (string)$card['idList'] : '';
+    
+    // Verificar se há filtro de listas e se o card está fora das listas configuradas
+    $isInFilteredList = true;
     if ($hasAllowedListFilter && ($currentCardListId === '' || !isset($allowedListIds[$currentCardListId]))) {
-        continue;
+        $isInFilteredList = false;
     }
 
     $cardLastActivity = isset($card['dateLastActivity']) ? (string)$card['dateLastActivity'] : (isset($board['dateLastActivity']) ? (string)$board['dateLastActivity'] : '');
@@ -761,10 +828,12 @@ foreach ($cards as $card) {
     if ($checkItemsCount > 0) {
         $items = isset($checkItemsDataByCard[$cardId]) ? $checkItemsDataByCard[$cardId] : [];
         foreach ($items as $item) {
+            // CONTAR TODOS OS CHECKITEMS, INDEPENDENTE DA LISTA
             $totalDemands++;
             $itemId = isset($item['id']) ? (string)$item['id'] : '';
 
-            if ($baseCreatedAt !== '') {
+            // Apenas adicionar ao gráfico se estiver na lista configurada
+            if ($isInFilteredList && $baseCreatedAt !== '') {
                 $key = gmdate('Y-m-d', strtotime($baseCreatedAt));
                 if (!isset($scopeByDate[$key])) {
                     $scopeByDate[$key] = 0;
@@ -774,42 +843,54 @@ foreach ($cards as $card) {
 
             $isComplete = isset($item['state']) && $item['state'] === 'complete';
             if ($isComplete) {
+                // CONTAR TODOS OS CHECKITEMS COMPLETOS, INDEPENDENTE DA LISTA
                 $completedDemands++;
-                $doneAt = isset($checkItemCompletedAt[$itemId]) ? $checkItemCompletedAt[$itemId] : $cardLastActivity;
-                if ($doneAt !== '') {
-                    $doneKey = gmdate('Y-m-d', strtotime($doneAt));
-                    if (!isset($doneByDate[$doneKey])) {
-                        $doneByDate[$doneKey] = 0;
+                
+                // Apenas adicionar ao gráfico se estiver na lista configurada
+                if ($isInFilteredList) {
+                    $doneAt = isset($checkItemCompletedAt[$itemId]) ? $checkItemCompletedAt[$itemId] : $cardLastActivity;
+                    if ($doneAt !== '') {
+                        $doneKey = gmdate('Y-m-d', strtotime($doneAt));
+                        if (!isset($doneByDate[$doneKey])) {
+                            $doneByDate[$doneKey] = 0;
+                        }
+                        $doneByDate[$doneKey]++;
                     }
-                    $doneByDate[$doneKey]++;
                 }
             }
         }
         continue;
     }
 
-    $totalDemands++;
-    if ($baseCreatedAt !== '') {
-        $key = gmdate('Y-m-d', strtotime($baseCreatedAt));
-        if (!isset($scopeByDate[$key])) {
-            $scopeByDate[$key] = 0;
-        }
-        $scopeByDate[$key]++;
-    }
-
-    $listId = $currentCardListId;
-    $isComplete = $listId !== '' && isset($doneListIds[$listId]);
-    if ($isComplete) {
-        $completedDemands++;
-        $doneAt = isset($cardDoneAt[$cardId]) ? $cardDoneAt[$cardId] : $cardLastActivity;
-        if ($doneAt !== '') {
-            $doneKey = gmdate('Y-m-d', strtotime($doneAt));
-            if (!isset($doneByDate[$doneKey])) {
-                $doneByDate[$doneKey] = 0;
+    // ===== CARDS SEM CHECKLIST =====
+    // NÃO CONTAR CARDS SEM CHECKLIST - contar apenas os checkItems
+    // Se precisar contar cards sem checklist no futuro, descomentar abaixo:
+    /*
+    if ($isInFilteredList) {
+        $totalDemands++;
+        if ($baseCreatedAt !== '') {
+            $key = gmdate('Y-m-d', strtotime($baseCreatedAt));
+            if (!isset($scopeByDate[$key])) {
+                $scopeByDate[$key] = 0;
             }
-            $doneByDate[$doneKey]++;
+            $scopeByDate[$key]++;
+        }
+
+        $listId = $currentCardListId;
+        $isComplete = $listId !== '' && isset($doneListIds[$listId]);
+        if ($isComplete) {
+            $completedDemands++;
+            $doneAt = isset($cardDoneAt[$cardId]) ? $cardDoneAt[$cardId] : $cardLastActivity;
+            if ($doneAt !== '') {
+                $doneKey = gmdate('Y-m-d', strtotime($doneAt));
+                if (!isset($doneByDate[$doneKey])) {
+                    $doneByDate[$doneKey] = 0;
+                }
+                $doneByDate[$doneKey]++;
+            }
         }
     }
+    */
 }
 
 if (empty($scopeByDate) && !empty($doneByDate)) {
@@ -901,6 +982,95 @@ $displayCompletedDemands = $hasDateFilter ? $periodCompletedDemands : $completed
 $openDemands = max(0, $displayTotalDemands - $displayCompletedDemands);
 $projectProgress = $displayTotalDemands > 0 ? round(($displayCompletedDemands / $displayTotalDemands) * 100, 2) : 0;
 $projectProgress .= '%';
+
+// ===== CÁLCULO DE ESTIMATIVA DE DATA =====
+$estimatedCompletionDate = '';
+$dailyVelocity = 0.0;
+$daysRemaining = 0;
+
+if (!$hasDateFilter && $displayTotalDemands > 0 && $displayCompletedDemands < $displayTotalDemands) {
+    // Calcular primeira e última data de TODA a atividade (scope + done)
+    $firstActivityDate = null;
+    $lastActivityDate = null;
+    
+    // Verificar datas em scopeByDate (criação)
+    foreach ($scopeByDate as $dateStr => $count) {
+        $dateTime = strtotime($dateStr);
+        if ($firstActivityDate === null || $dateTime < $firstActivityDate) {
+            $firstActivityDate = $dateTime;
+        }
+        if ($lastActivityDate === null || $dateTime > $lastActivityDate) {
+            $lastActivityDate = $dateTime;
+        }
+    }
+    
+    // Verificar datas em doneByDate (conclusão)
+    foreach ($doneByDate as $dateStr => $count) {
+        $dateTime = strtotime($dateStr);
+        if ($firstActivityDate === null || $dateTime < $firstActivityDate) {
+            $firstActivityDate = $dateTime;
+        }
+        if ($lastActivityDate === null || $dateTime > $lastActivityDate) {
+            $lastActivityDate = $dateTime;
+        }
+    }
+    
+    // Se ainda não há data, usar a última atividade do board
+    if ($lastActivityDate === null && $lastActivity !== null) {
+        $lastActivityDate = strtotime($lastActivity);
+        if ($firstActivityDate === null) {
+            $firstActivityDate = $lastActivityDate;
+        }
+    }
+    
+    if ($lastActivityDate !== null && $firstActivityDate !== null) {
+        // Calcular dias úteis entre primeira e última atividade
+        $businessDaysBetween = 0;
+        $currentDate = $firstActivityDate;
+        
+        while ($currentDate <= $lastActivityDate) {
+            $dayOfWeek = (int)gmdate('w', $currentDate);
+            if ($dayOfWeek !== 0 && $dayOfWeek !== 6) { // 0 = domingo, 6 = sábado
+                $businessDaysBetween++;
+            }
+            $currentDate += 86400; // 1 dia em segundos
+        }
+        
+        // Calcular velocidade diária (atividades concluídas / dias úteis)
+        // Se houver pouca história, usar uma velocidade padrão (5 demandas/dia)
+        $effectiveDays = max(1, $businessDaysBetween);
+        $dailyVelocity = $effectiveDays > 0 ? $displayCompletedDemands / $effectiveDays : 5.0;
+        
+        // Se velocidade for muito alta (tudo em 1-2 dias), limitar a 5 demandas/dia para previsão
+        if ($dailyVelocity > 5.0) {
+            $dailyVelocity = 5.0;
+        }
+        
+        // Calcular demandas restantes
+        $remainingDemands = $displayTotalDemands - $displayCompletedDemands;
+        
+        // Calcular dias úteis necessários
+        if ($dailyVelocity > 0) {
+            $daysRemaining = ceil($remainingDemands / $dailyVelocity);
+            
+            // Usar a data atual (hoje) como ponto de partida para a previsão
+            $today = strtotime(gmdate('Y-m-d')); // Hoje em GMT, sem hora
+            $futureDate = $today;
+            $daysAdded = 0;
+            
+            while ($daysAdded < $daysRemaining) {
+                $futureDate += 86400; // Adicionar 1 dia
+                $dayOfWeek = (int)gmdate('w', $futureDate);
+                if ($dayOfWeek !== 0 && $dayOfWeek !== 6) { // Contar apenas dias úteis
+                    $daysAdded++;
+                }
+            }
+            
+            $estimatedCompletionDate = gmdate('d/m/Y', $futureDate);
+        }
+    }
+}
+
 $currentFileName = basename($jsonPath);
 $clearFilterParams = [];
 if ($selectedFileRel !== '') {
@@ -1095,8 +1265,14 @@ usort($inProgressCards, static function (array $a, array $b): int {
             <?php if ($listConfigSuccess): ?>
                 <div class="alert alert-success py-2">Configuração de listas salva com sucesso.</div>
             <?php endif; ?>
+            <?php if ($updateListNamesSuccess): ?>
+                <div class="alert alert-success py-2">Nomes das listas atualizados com sucesso.</div>
+            <?php endif; ?>
             <?php if ($listConfigError !== null): ?>
                 <div class="alert alert-danger py-2"><?php echo htmlspecialchars($listConfigError, ENT_QUOTES, 'UTF-8'); ?></div>
+            <?php endif; ?>
+            <?php if ($updateListNamesError !== null): ?>
+                <div class="alert alert-danger py-2"><?php echo htmlspecialchars($updateListNamesError, ENT_QUOTES, 'UTF-8'); ?></div>
             <?php endif; ?>
             <form method="post" class="row g-3">
                 <input type="hidden" name="action" value="save_list_config">
@@ -1106,6 +1282,12 @@ usort($inProgressCards, static function (array $a, array $b): int {
 
                 <div class="col-12">
                     <label class="form-label">Listas que contarão como pendentes</label>
+                    <?php if (empty($boardListsIndex)): ?>
+                        <div class="alert alert-warning py-2 small">
+                            <strong>⚠️ Nenhuma lista encontrada</strong><br>
+                            O arquivo JSON carregado não contém listas. Verifique se o arquivo está correto ou se é um export válido do Trello.
+                        </div>
+                    <?php else: ?>
                     <div class="row g-2">
                         <?php foreach ($boardListsIndex as $indexKey => $listMeta): ?>
                             <?php $isPendingChecked = in_array($listMeta['id'], $configuredPendingListIds, true); ?>
@@ -1119,7 +1301,7 @@ usort($inProgressCards, static function (array $a, array $b): int {
                             </div>
                         <?php endforeach; ?>
                     </div>
-                </div>
+                    <?php endif; ?>
 
                 <div class="col-12">
                     <label class="form-label">Listas que contarão como concluídas</label>
@@ -1158,6 +1340,19 @@ usort($inProgressCards, static function (array $a, array $b): int {
 
                 <div class="col-12 col-md-3 d-grid align-self-end">
                     <button class="btn btn-primary" type="submit">Salvar configuração</button>
+                </div>
+            </form>
+
+            <form method="post" class="mt-3">
+                <input type="hidden" name="action" value="refresh_list_names">
+                <input type="hidden" name="source_file" value="<?php echo htmlspecialchars($selectedFileRel, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="start_date" value="<?php echo htmlspecialchars($filterStartInput, ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="end_date" value="<?php echo htmlspecialchars($filterEndInput, ENT_QUOTES, 'UTF-8'); ?>">
+                <div class="d-flex align-items-center gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" type="submit" title="Sincroniza os nomes das listas do arquivo JSON atual com a configuração salva">
+                        <i class="fa-solid fa-arrows-rotate"></i> Sincronizar nomes das listas
+                    </button>
+                    <small class="text-muted">Use quando renomear listas no Trello</small>
                 </div>
             </form>
         </div>
@@ -1210,6 +1405,13 @@ usort($inProgressCards, static function (array $a, array $b): int {
                 <div class="col-md-4"><strong>Demandas em aberto:</strong> <?php echo $openDemands; ?></div>
                 <div class="col-md-8"><strong>URL:</strong> <a href="<?php echo htmlspecialchars($boardUrl, ENT_QUOTES, 'UTF-8'); ?>" target="_blank" rel="noopener noreferrer"><?php echo htmlspecialchars($boardUrl, ENT_QUOTES, 'UTF-8'); ?></a></div>
                 <div class="col-md-8"><strong>Progresso do Projeto:</strong> <?php echo $projectProgress; ?></div>
+                <?php if ($estimatedCompletionDate !== '' && !$hasDateFilter): ?>
+                <div class="col-md-8">
+                    <strong>Previsão de Conclusão:</strong> 
+                    <span class="badge bg-info"><?php echo htmlspecialchars($estimatedCompletionDate, ENT_QUOTES, 'UTF-8'); ?></span>
+                    <small class="text-muted">(velocidade: <?php echo round($dailyVelocity, 2); ?> demandas/dia útil)</small>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
     </div>
