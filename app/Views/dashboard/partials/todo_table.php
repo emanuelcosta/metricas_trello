@@ -111,7 +111,10 @@
                     <td colspan="4" class="py-1 px-3 small fw-semibold text-secondary">
                         <i class="fa-regular fa-square me-1"></i>
                         Sem checklist
-                        <span class="fw-normal">— <?php echo count($toDoWithoutCl); ?> cartão<?php echo count($toDoWithoutCl) !== 1 ? 'ões' : ''; ?></span>
+                        <span class="fw-normal">
+                            — <?php echo count($toDoWithoutCl); ?> cartão<?php echo count($toDoWithoutCl) !== 1 ? 'ões' : ''; ?>,
+                            <?php echo count($toDoWithoutCl); ?> <?php echo count($toDoWithoutCl) !== 1 ? 'itens' : 'item'; ?> (0 concluídos)
+                        </span>
                     </td>
                 </tr>
                 <?php foreach ($toDoWithoutCl as $tdCard):
